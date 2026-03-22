@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.3] - 2026-03-22
+
+### Fixed
+
+- Updated README license badge to a stable MIT badge to avoid intermittent "package not found" rendering on npm package page.
+
 ## [0.1.2] - 2026-03-22
 
 ### Added
