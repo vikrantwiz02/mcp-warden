@@ -16,6 +16,8 @@ function createPolicy(overrides: Partial<GuardianPolicy> = {}): GuardianPolicy {
 }
 
 describe("McpGuardian", () => {
+  const stripeLikeFixture = ["sk", "test", "51M0cha0sExampleSecret"].join("_");
+
   it("blocks unauthorized tool calls", async () => {
     const guardian = new McpGuardian(createPolicy());
 
@@ -43,6 +45,7 @@ describe("McpGuardian", () => {
       result: {
         email: "user@example.com",
         secret: "sk-ABCDEF12345678",
+        stripe: stripeLikeFixture,
         ip: "192.168.1.24"
       }
     }));
@@ -60,6 +63,7 @@ describe("McpGuardian", () => {
     const payload = response as { result?: Record<string, unknown> };
     expect(payload.result?.email).toBe("[REDACTED]");
     expect(payload.result?.secret).toBe("[REDACTED]");
+    expect(payload.result?.stripe).toBe("[REDACTED]");
     expect(payload.result?.ip).toBe("[REDACTED]");
   });
 

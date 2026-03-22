@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Enforced `restrictedPaths` in the interceptor by scanning tool arguments for path-like keys and denying calls targeting blocked paths.
 - Added human-in-the-loop enforcement for `approvalRequired`, returning `REQUIRES_APPROVAL` before tool execution.
 - Expanded policy error handling to return explicit status-aware JSON-RPC errors for permission denial and approval-required outcomes.
+- Hardened PII redaction to detect and mask Stripe-style keys (`sk_test_...` and `sk_live_...`).
 
 ### Fixed
 

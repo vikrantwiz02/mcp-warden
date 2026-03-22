@@ -11,7 +11,8 @@ const EMAIL_REGEX = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 /**
  * Finds key-like secrets with common prefixes such as sk- and key-.
  */
-const API_KEY_REGEX = /\b(?:sk|key|api|token)-[A-Z0-9_-]{8,}\b/gi;
+const API_KEY_REGEX =
+  /\b(?:sk_(?:test|live)_[A-Z0-9]{8,}|(?:sk|key|api|token)-[A-Z0-9_-]{8,})\b/gi;
 
 /**
  * Finds IPv4 addresses and excludes impossible octets.
