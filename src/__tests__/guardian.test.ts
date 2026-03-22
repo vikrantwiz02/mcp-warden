@@ -10,7 +10,7 @@ function createPolicy(overrides: Partial<GuardianPolicy> = {}): GuardianPolicy {
     allowedTools: ["safe-tool"],
     restrictedPaths: [],
     maxCallsPerMinute: 10,
-    approvalRequired: true,
+    approvalRequired: false,
     ...overrides
   };
 }
@@ -61,6 +61,48 @@ describe("McpGuardian", () => {
     expect(payload.result?.email).toBe("[REDACTED]");
     expect(payload.result?.secret).toBe("[REDACTED]");
     expect(payload.result?.ip).toBe("[REDACTED]");
+  });
+
+  it("blocks tool calls that include blocked filesystem paths", async () => {
+    const guardian = new McpGuardian(
+      createPolicy({
+        restrictedPaths: [{ path: "/sensitive", mode: "blocked" }]
+      })
+    );
+
+    const result = await guardian.validateRequest({
+      jsonrpc: "2.0",
+      id: 13,
+      method: "tools/call",
+      params: {
+        name: "safe-tool",
+        arguments: {
+          path: "/sensitive/secret.txt"
+        }
+      }
+    });
+
+    expect(result.isAllowed).toBe(false);
+    expect(result.error?.error.message).toBe("PERMISSION_DENIED");
+    expect(result.violation?.reason).toContain("restricted path");
+  });
+
+  it("returns REQUIRES_APPROVAL when policy requires human approval", async () => {
+    const guardian = new McpGuardian(createPolicy({ approvalRequired: true }));
+
+    const result = await guardian.validateRequest({
+      jsonrpc: "2.0",
+      id: 31,
+      method: "tools/call",
+      params: {
+        name: "safe-tool",
+        arguments: { input: "go" }
+      }
+    });
+
+    expect(result.isAllowed).toBe(false);
+    expect(result.error?.error.message).toBe("REQUIRES_APPROVAL");
+    expect(result.violation?.code).toBe("REQUIRES_APPROVAL");
   });
 
   it("triggers rate limiting after max calls per minute", async () => {

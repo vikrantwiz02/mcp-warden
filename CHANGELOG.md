@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.4] - 2026-03-22
+
+### Security
+
+- Enforced `restrictedPaths` in the interceptor by scanning tool arguments for path-like keys and denying calls targeting blocked paths.
+- Added human-in-the-loop enforcement for `approvalRequired`, returning `REQUIRES_APPROVAL` before tool execution.
+- Expanded policy error handling to return explicit status-aware JSON-RPC errors for permission denial and approval-required outcomes.
+
+### Fixed
+
+- Synced CLI version reporting with `package.json` by resolving the version dynamically at runtime instead of using a hardcoded value.
+- Added workflow-level smart publish guard to skip npm publication when the current package version already exists on the registry, preventing false-negative release failures.
+
+### Tests
+
+- Added coverage to verify blocked filesystem paths are denied.
+- Added coverage to verify `REQUIRES_APPROVAL` behavior when policy requires manual approval.
+
 ## [0.1.3] - 2026-03-22
 
 ### Fixed

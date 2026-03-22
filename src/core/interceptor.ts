@@ -43,11 +43,13 @@ export interface JsonRpcErrorResponse {
   error: JsonRpcError;
 }
 
+export type GuardianViolationCode = "PERMISSION_DENIED" | "REQUIRES_APPROVAL";
+
 /**
  * Security violation metadata emitted by the guardian engine.
  */
 export interface GuardianViolation {
-  code: "PERMISSION_DENIED";
+  code: GuardianViolationCode;
   reason: string;
   method: string;
   toolName?: string;
@@ -67,6 +69,7 @@ export interface ValidationResult {
  */
 export interface MiddlewareDecision {
   allowed: boolean;
+  code?: GuardianViolationCode;
   reason?: string;
 }
 
@@ -110,6 +113,20 @@ export interface McpGuardianOptions {
  * Constant JSON-RPC code used for permission-denied failures.
  */
 const PERMISSION_DENIED_NUMERIC_CODE = -32001;
+const REQUIRES_APPROVAL_NUMERIC_CODE = -32002;
+
+const PATH_ARG_KEYS = new Set([
+  "path",
+  "paths",
+  "root",
+  "roots",
+  "directory",
+  "directories",
+  "dir",
+  "cwd",
+  "filepath",
+  "file_path"
+]);
 
 /**
  * Detects whether a request looks like an MCP tool call.
@@ -170,8 +187,9 @@ function isJsonRpcErrorResponse(response: unknown): response is JsonRpcErrorResp
 /**
  * Creates a standardized JSON-RPC permission error response.
  */
-function createPermissionDeniedError(
+function createPolicyError(
   request: JsonRpcRequest,
+  code: GuardianViolationCode,
   reason: string,
   toolName?: string
 ): JsonRpcErrorResponse {
@@ -179,8 +197,8 @@ function createPermissionDeniedError(
     jsonrpc: "2.0",
     id: request.id ?? null,
     error: {
-      code: PERMISSION_DENIED_NUMERIC_CODE,
-      message: "PERMISSION_DENIED",
+      code: code === "REQUIRES_APPROVAL" ? REQUIRES_APPROVAL_NUMERIC_CODE : PERMISSION_DENIED_NUMERIC_CODE,
+      message: code,
       data: {
         reason,
         method: request.method,
@@ -188,6 +206,48 @@ function createPermissionDeniedError(
       }
     }
   };
+}
+
+function normalizePolicyPath(value: string): string {
+  let normalized = value.trim().replaceAll("\\", "/").toLowerCase();
+  if (normalized.length > 1 && normalized.endsWith("/")) {
+    normalized = normalized.slice(0, -1);
+  }
+
+  return normalized;
+}
+
+function matchesBlockedPath(candidatePath: string, blockedPath: string): boolean {
+  if (blockedPath === "/") {
+    return candidatePath.startsWith("/");
+  }
+
+  return candidatePath === blockedPath || candidatePath.startsWith(`${blockedPath}/`);
+}
+
+function collectCandidatePaths(payload: unknown, parentKey?: string): string[] {
+  if (typeof payload === "string") {
+    if (parentKey && PATH_ARG_KEYS.has(parentKey)) {
+      return [payload];
+    }
+
+    return [];
+  }
+
+  if (Array.isArray(payload)) {
+    return payload.flatMap((entry) => collectCandidatePaths(entry, parentKey));
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const result: string[] = [];
+  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+    result.push(...collectCandidatePaths(value, key.toLowerCase()));
+  }
+
+  return result;
 }
 
 /**
@@ -250,6 +310,68 @@ async function enforceInjectionPolicy(
   }
 
   return next();
+}
+
+/**
+ * Middleware that denies tool calls targeting blocked filesystem paths.
+ */
+async function enforceRestrictedPaths(
+  context: GuardianContext,
+  next: () => Promise<MiddlewareDecision>
+): Promise<MiddlewareDecision> {
+  if (!isToolCallRequest(context.request)) {
+    return next();
+  }
+
+  const blockedPaths = context.policy.restrictedPaths
+    .filter((entry) => entry.mode === "blocked")
+    .map((entry) => normalizePolicyPath(entry.path));
+
+  if (blockedPaths.length === 0) {
+    return next();
+  }
+
+  const candidatePaths = collectCandidatePaths(context.toolArgs)
+    .map((value) => normalizePolicyPath(value))
+    .filter((value) => value.length > 0);
+
+  for (const candidatePath of candidatePaths) {
+    const matchedBlockedPath = blockedPaths.find((blockedPath) =>
+      matchesBlockedPath(candidatePath, blockedPath)
+    );
+
+    if (matchedBlockedPath) {
+      return {
+        allowed: false,
+        code: "PERMISSION_DENIED",
+        reason: `Tool arguments include restricted path '${candidatePath}' blocked by policy.`
+      };
+    }
+  }
+
+  return next();
+}
+
+/**
+ * Middleware that marks tool calls as requiring human approval.
+ */
+async function enforceApprovalRequired(
+  context: GuardianContext,
+  next: () => Promise<MiddlewareDecision>
+): Promise<MiddlewareDecision> {
+  if (!isToolCallRequest(context.request)) {
+    return next();
+  }
+
+  if (!context.policy.approvalRequired) {
+    return next();
+  }
+
+  return {
+    allowed: false,
+    code: "REQUIRES_APPROVAL",
+    reason: "Human approval is required by policy before executing this tool call."
+  };
 }
 
 /**
@@ -345,6 +467,8 @@ export class McpGuardian {
 
     this.middlewares = [
       enforceAllowedTools,
+      enforceRestrictedPaths,
+      enforceApprovalRequired,
       async (context, next) =>
         enforceRateLimit(context, next, this.rateLimiter, this.nowProvider),
       async (context, next) => enforceInjectionPolicy(context, next, this.injectionKeywords),
@@ -379,9 +503,14 @@ export class McpGuardian {
       return { isAllowed: true };
     }
 
+    const violationCode = decision.code ?? "PERMISSION_DENIED";
     const violation: GuardianViolation = {
-      code: "PERMISSION_DENIED",
-      reason: decision.reason ?? "Request violated guardian policy.",
+      code: violationCode,
+      reason:
+        decision.reason ??
+        (violationCode === "REQUIRES_APPROVAL"
+          ? "Human approval is required before executing this request."
+          : "Request violated guardian policy."),
       method: request.method,
       ...(toolName ? { toolName } : {})
     };
@@ -397,7 +526,7 @@ export class McpGuardian {
     return {
       isAllowed: false,
       violation,
-      error: createPermissionDeniedError(request, violation.reason, toolName)
+      error: createPolicyError(request, violation.code, violation.reason, toolName)
     };
   }
 

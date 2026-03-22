@@ -2,6 +2,7 @@
 
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import chalk from "chalk";
 import { Command } from "commander";
 import { GuardianPolicySchema, type GuardianPolicy } from "../types/policy.js";
@@ -238,15 +239,37 @@ async function runInit(outputPath: string, force: boolean): Promise<void> {
 }
 
 /**
+ * Resolves CLI version from package.json to avoid hardcoded drift.
+ */
+async function resolveCliVersion(): Promise<string> {
+  const currentFilePath = fileURLToPath(import.meta.url);
+  const currentDir = path.dirname(currentFilePath);
+  const packageJsonPath = path.resolve(currentDir, "../../package.json");
+
+  try {
+    const content = await fs.readFile(packageJsonPath, "utf8");
+    const parsed = JSON.parse(content) as { version?: unknown };
+    if (typeof parsed.version === "string" && parsed.version.length > 0) {
+      return parsed.version;
+    }
+  } catch {
+    // Fall back to a safe placeholder if package metadata cannot be read.
+  }
+
+  return "0.0.0";
+}
+
+/**
  * Boots the mcp-warden CLI.
  */
 async function main(): Promise<void> {
   const program = new Command();
+  const cliVersion = await resolveCliVersion();
 
   program
     .name("mcp-warden")
     .description("Security auditing and policy tooling for MCP servers")
-    .version("0.1.0");
+    .version(cliVersion);
 
   program
     .command("audit")

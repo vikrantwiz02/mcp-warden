@@ -9,6 +9,8 @@ High-performance security guardrails for MCP-compatible AI agents and tool execu
 ## Features
 
 - Policy-based tool authorization for MCP tool calls.
+- Filesystem path enforcement for blocked paths defined in policy.
+- Human-in-the-loop gating with `REQUIRES_APPROVAL` status when approval is mandated.
 - Prompt-injection scanning for high-risk control phrases.
 - Output redaction for email addresses, API keys, and IP addresses.
 - Built-in rate limiting and circuit-breaker protection.
@@ -30,6 +32,8 @@ AI agents can execute tools with real-world side effects: reading files, modifyi
 
 mcp-warden helps enforce a security boundary before and after tool execution:
 - Blocks unauthorized tools using explicit policy rules.
+- Denies tool calls that target blocked filesystem paths from policy.
+- Returns `REQUIRES_APPROVAL` before execution when `approvalRequired` is enabled.
 - Detects prompt-injection signatures in tool arguments.
 - Enforces rate limits to reduce abuse and runaway call storms.
 - Applies circuit-breaker protection for repeated tool failures.
@@ -107,7 +111,7 @@ mcp-warden init
 | allowedTools | Array<string \| RegExp> | Yes | Allowed tool names or regex matchers for tools/call requests. | ["read_file", /^search_/] |
 | restrictedPaths | Array<{ path: string; mode: "read-only" \| "blocked" }> | Yes | Directory access constraints used by filesystem-aware middleware. | [{ "path": "/", "mode": "blocked" }] |
 | maxCallsPerMinute | number | Yes | Rolling 60-second budget for tool calls. Requests above this limit are denied. | 60 |
-| approvalRequired | boolean | Yes | Indicates destructive actions should require explicit approval in your orchestration flow. | true |
+| approvalRequired | boolean | Yes | When true, tool calls are paused with `REQUIRES_APPROVAL` until explicit human approval is granted by the host system. | true |
 
 ## CLI Commands
 
