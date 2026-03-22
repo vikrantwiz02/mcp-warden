@@ -1,7 +1,7 @@
 # mcp-warden
 
 [![NPM Version](https://img.shields.io/npm/v/mcp-warden)](https://www.npmjs.com/package/mcp-warden)
-[![License](https://img.shields.io/npm/l/mcp-warden)](https://www.npmjs.com/package/mcp-warden)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/vikrantwiz02/mcp-warden?tab=MIT-1-ov-file)
 [![Bundle Size](https://img.shields.io/bundlephobia/min/mcp-warden)](https://bundlephobia.com/package/mcp-warden)
 
 High-performance security guardrails for MCP-compatible AI agents and tool execution.
