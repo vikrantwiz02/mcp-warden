@@ -1,6 +1,6 @@
 {
   "name": "mcp-warden",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Policy enforcement and guardrails for MCP-compatible tool execution.",
   "type": "module",
   "license": "MIT",
