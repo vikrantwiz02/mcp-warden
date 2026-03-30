@@ -105,12 +105,12 @@ export interface GuardianMetrics {
   timestamp: number;
   /** JSON-RPC method name. */
   method: string;
-  /** Tool name if this was a tools/call request. */
-  toolName?: string;
+  /** Tool name if this was a tools/call request. Undefined for non-tool-call methods. */
+  toolName: string | undefined;
   /** Whether the request was allowed. */
   allowed: boolean;
-  /** Violation code when blocked. */
-  violationCode?: GuardianViolationCode;
+  /** Violation code when blocked. Undefined when allowed. */
+  violationCode: GuardianViolationCode | undefined;
   /** Processing time in milliseconds. */
   durationMs: number;
 }
@@ -666,7 +666,7 @@ export class McpGuardian {
 
   private readonly nowProvider: () => number;
 
-  private readonly metricsHook?: GuardianMetricsHook;
+  private readonly metricsHook: GuardianMetricsHook | undefined;
 
   /**
    * Creates a guardian instance with policy and optional runtime controls.
@@ -738,6 +738,7 @@ export class McpGuardian {
         method: request.method,
         toolName,
         allowed: true,
+        violationCode: undefined,
         durationMs
       });
       return { isAllowed: true };
@@ -761,7 +762,7 @@ export class McpGuardian {
       method: request.method,
       toolName,
       allowed: false,
-      violationCode,
+      violationCode: violationCode,
       durationMs
     });
 
