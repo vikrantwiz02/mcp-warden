@@ -4,21 +4,27 @@
 export const REDACTION_TOKEN = "[REDACTED]";
 
 /**
- * Finds common email address patterns.
+ * Combined pattern that matches emails, API keys, IPv4, IPv6, and phone numbers
+ * in a single pass for efficiency.
+ *
+ * Named capture groups identify which category matched so the replacer
+ * can be extended without reordering.
  */
-const EMAIL_REGEX = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
-
-/**
- * Finds key-like secrets with common prefixes such as sk- and key-.
- */
-const API_KEY_REGEX =
-  /\b(?:sk_(?:test|live)_[A-Z0-9]{8,}|(?:sk|key|api|token)-[A-Z0-9_-]{8,})\b/gi;
-
-/**
- * Finds IPv4 addresses and excludes impossible octets.
- */
-const IPV4_REGEX =
-  /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/g;
+const COMBINED_SENSITIVE_REGEX = new RegExp(
+  [
+    // Email addresses
+    "(?<email>\\b[A-Z0-9._%+\\-]+@[A-Z0-9.\\-]+\\.[A-Z]{2,}\\b)",
+    // Stripe-style and generic API keys / tokens
+    "(?<apikey>\\b(?:sk_(?:test|live)_[A-Z0-9]{8,}|(?:sk|key|api|token)-[A-Z0-9_\\-]{8,})\\b)",
+    // IPv6 — full and compressed forms (must come before IPv4 to avoid partial matches)
+    "(?<ipv6>(?:[0-9A-F]{1,4}:){7}[0-9A-F]{1,4}|(?:[0-9A-F]{1,4}:){1,7}:|(?:[0-9A-F]{1,4}:){1,6}:[0-9A-F]{1,4}|::(?:[0-9A-F]{1,4}:){0,5}[0-9A-F]{1,4}|::)",
+    // IPv4 addresses with valid octet ranges
+    "(?<ipv4>\\b(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\b)",
+    // Phone numbers — E.164, US, and common international formats
+    "(?<phone>(?:\\+?1[\\s.\\-]?)?\\(?\\d{3}\\)?[\\s.\\-]?\\d{3}[\\s.\\-]?\\d{4})"
+  ].join("|"),
+  "gi"
+);
 
 /**
  * Summary of a single text redaction operation.
@@ -29,24 +35,17 @@ export interface RedactionSummary {
 }
 
 /**
- * Redacts sensitive values from a plain string.
+ * Redacts sensitive values from a plain string in a single regex pass.
  */
 export function redactSensitiveText(input: string): RedactionSummary {
   let redactedCount = 0;
 
-  const replacer = (): string => {
+  const value = input.replace(COMBINED_SENSITIVE_REGEX, () => {
     redactedCount += 1;
     return REDACTION_TOKEN;
-  };
+  });
 
-  let value = input.replace(EMAIL_REGEX, replacer);
-  value = value.replace(API_KEY_REGEX, replacer);
-  value = value.replace(IPV4_REGEX, replacer);
-
-  return {
-    value,
-    redactedCount
-  };
+  return { value, redactedCount };
 }
 
 /**

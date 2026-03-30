@@ -15,6 +15,8 @@ export {
   McpGuardian,
   type GuardianContext,
   type GuardianLogger,
+  type GuardianMetrics,
+  type GuardianMetricsHook,
   type GuardianMiddleware,
   type GuardianViolation,
   type JsonRpcError,
@@ -23,6 +25,7 @@ export {
   type JsonRpcRequest,
   type McpGuardianOptions,
   type MiddlewareDecision,
+  type ToolRateLimit,
   type ValidationResult
 } from "./core/interceptor.js";
 
