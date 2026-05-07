@@ -14,6 +14,8 @@ const COMBINED_SENSITIVE_REGEX = new RegExp(
   [
     // Email addresses
     "(?<email>\\b[A-Z0-9._%+\\-]+@[A-Z0-9.\\-]+\\.[A-Z]{2,}\\b)",
+    // Common key-value secret assignments
+    "(?<kvsecret>\\b(?:api[_-]?key|token|secret|password)\\s*[:=]\\s*[\"']?[^\"'\\s;]+[\"']?)",
     // Stripe-style and generic API keys / tokens
     "(?<apikey>\\b(?:sk_(?:test|live)_[A-Z0-9]{8,}|(?:sk|key|api|token)-[A-Z0-9_\\-]{8,})\\b)",
     // IPv6 — full and compressed forms (must come before IPv4 to avoid partial matches)

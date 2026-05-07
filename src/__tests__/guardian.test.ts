@@ -114,6 +114,28 @@ describe("PII redaction", () => {
     expect(payload.result?.ip).toBe("[REDACTED]");
   });
 
+  it("redacts key-value API keys and tokens in tool responses", async () => {
+    const guardian = new McpGuardian(createPolicy());
+
+    const guardedHandler = guardian.wrapHandler(async () => ({
+      jsonrpc: "2.0" as const,
+      id: 24,
+      result: {
+        text: "apiKey=abc123456789 token:secret-value password = hunter2"
+      }
+    }));
+
+    const response = await guardedHandler({
+      jsonrpc: "2.0",
+      id: 24,
+      method: "tools/call",
+      params: { name: "safe-tool", arguments: {} }
+    });
+
+    const payload = response as { result?: Record<string, unknown> };
+    expect(payload.result?.text).toBe("[REDACTED] [REDACTED] [REDACTED]");
+  });
+
   it("does not redact when redactToolOutputs is false", async () => {
     const guardian = new McpGuardian(createPolicy(), { redactToolOutputs: false });
 
