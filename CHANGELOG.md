@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.0] - 2026-05-07
+
+### Removed
+- All runtime dependencies (`zod`, `chalk`, `commander`) — package now ships with **zero runtime dependencies**.
+
+### Changed
+- `src/types/policy.ts` rewritten with a custom validator that preserves the `.parse()` / `.safeParse()` public API surface and produces field-level error messages (e.g. `"restrictedPaths[0].mode must be 'read-only' or 'blocked'"`).
+- CLI ANSI colors replaced by inline escape-code helpers; argument parsing replaced by a native `process.argv` parser — all existing flags and commands behave identically.
+- `McpGuardian` now extends `TypedEmitter<GuardianEventMap>` for structured event subscription.
+- `metricsHook` option retained for backwards compatibility but marked deprecated in favour of `.on()`.
+
+### Added
+- **`PolicyBuilder`** — fluent API for constructing `GuardianPolicy` objects: `.allow()`, `.block()`, `.readOnly()`, `.rateLimit()`, `.requireApproval()`, `.argSchema()`, `.build()`.
+- **Argument schema validation** — new `toolArgSchemas` field on `GuardianPolicy`; `validateArgs(args, schema)` exported for standalone use; new `enforceArgSchema` middleware runs between input-size limits and path checks.
+- **`TypedEmitter<TMap>`** — zero-dependency typed event emitter with `.on()` / `.off()` / `.once()` exported for reuse.
+- **`GuardianEvent` / `GuardianEventMap`** types — subscribe to `'allowed'` and `'blocked'` events on any `McpGuardian` instance.
+- **`GuardianPolicySchema.safeParse()`** — result-based parsing without try/catch.
+- **CLI `validate <policy-path>`** — validates a policy JSON file and exits `1` on error.
+- **CLI `schema [--output <path>]`** — prints the GuardianPolicy JSON Schema (draft-07) to stdout or a file.
+- **CLI `audit --watch <config-path>`** — re-audits on file change with 100 ms debounce (Ctrl-C to stop).
+
 ## [1.0.0] - 2026-03-30
 
 ### Added

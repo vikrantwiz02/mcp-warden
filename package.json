@@ -1,6 +1,6 @@
 {
   "name": "mcp-warden",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Policy enforcement and guardrails for MCP-compatible tool execution.",
   "type": "module",
   "license": "MIT",
@@ -43,16 +43,15 @@
     "security",
     "rate-limit",
     "circuit-breaker",
-    "pii-redaction"
+    "pii-redaction",
+    "event-emitter",
+    "schema-validation",
+    "fluent-api"
   ],
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {
-    "chalk": "^5.6.0",
-    "commander": "^14.0.1",
-    "zod": "^3.24.2"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@eslint/js": "^9.20.0",
     "@types/node": "^24.0.0",

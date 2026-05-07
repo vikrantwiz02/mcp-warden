@@ -9,6 +9,8 @@ import {
 } from "../security/injection-scanner.js";
 import { redactSensitiveData } from "../security/pii-redactor.js";
 import { RateLimiter } from "../security/rate-limiter.js";
+import { validateArgs } from "../security/arg-validator.js";
+import { TypedEmitter } from "../events/typed-emitter.js";
 
 /**
  * JSON-RPC request identifier shape.
@@ -117,6 +119,7 @@ export interface GuardianMetrics {
 
 /**
  * Callback invoked after every request validation with observability data.
+ * @deprecated Prefer subscribing via `guardian.on('allowed' | 'blocked', listener)`.
  */
 export type GuardianMetricsHook = (metrics: GuardianMetrics) => void;
 
@@ -132,6 +135,36 @@ export interface ToolRateLimit {
 }
 
 /**
+ * Typed event emitted by `McpGuardian` after every validated request.
+ */
+export interface GuardianEvent {
+  /** Whether the request was allowed or blocked. */
+  type: "allowed" | "blocked";
+  /** Unix timestamp (ms) when the request was processed. */
+  timestamp: number;
+  /** JSON-RPC method name. */
+  method: string;
+  /** Tool name for `tools/call` requests; `undefined` otherwise. */
+  toolName: string | undefined;
+  /** Violation code when `type` is `"blocked"`. */
+  violationCode: GuardianViolationCode | undefined;
+  /** Human-readable reason when `type` is `"blocked"`. */
+  reason: string | undefined;
+  /** Processing time in milliseconds. */
+  durationMs: number;
+}
+
+/**
+ * Event map for `McpGuardian`. Use with `.on()` / `.off()` / `.once()`.
+ */
+export interface GuardianEventMap {
+  /** Fired when a request passes all policy checks. */
+  allowed: GuardianEvent;
+  /** Fired when a request is blocked by any policy check. */
+  blocked: GuardianEvent;
+}
+
+/**
  * Configuration object for McpGuardian construction.
  */
 export interface McpGuardianOptions {
@@ -141,7 +174,7 @@ export interface McpGuardianOptions {
   circuitBreaker?: CircuitBreakerOptions;
   redactToolOutputs?: boolean;
   nowProvider?: () => number;
-  /** Called after every request with observability data. */
+  /** Called after every request with observability data. @deprecated Use `.on()` instead. */
   metricsHook?: GuardianMetricsHook;
   /** Per-tool rate limit overrides. First match wins. */
   toolRateLimits?: ToolRateLimit[];
@@ -405,23 +438,65 @@ async function enforceAllowedTools(
 }
 
 /**
- * Middleware that rejects requests when prompt-injection signatures are present.
+ * Middleware that rejects payloads exceeding depth or byte-size limits.
  */
-async function enforceInjectionPolicy(
+async function enforceInputLimits(
   context: GuardianContext,
   next: () => Promise<MiddlewareDecision>,
-  keywords: readonly string[]
+  maxDepth: number,
+  maxBytes: number
 ): Promise<MiddlewareDecision> {
-  if (!isToolCallRequest(context.request)) {
+  if (!isToolCallRequest(context.request) || context.toolArgs === undefined) {
     return next();
   }
 
-  const scanResult = scanForPromptInjection(context.toolArgs, keywords);
-  if (scanResult.detected) {
-    const signatures = scanResult.matchedKeywords.join(", ");
+  const depth = measureDepth(context.toolArgs);
+  if (depth > maxDepth) {
     return {
       allowed: false,
-      reason: `Prompt injection signature detected: ${signatures}.`
+      reason: `Tool arguments exceed maximum nesting depth of ${maxDepth}.`
+    };
+  }
+
+  try {
+    const serialized = JSON.stringify(context.toolArgs);
+    if (serialized.length > maxBytes) {
+      return {
+        allowed: false,
+        reason: `Tool arguments exceed maximum size of ${maxBytes} bytes.`
+      };
+    }
+  } catch {
+    return {
+      allowed: false,
+      reason: "Tool arguments could not be serialized for size validation."
+    };
+  }
+
+  return next();
+}
+
+/**
+ * Middleware that validates tool arguments against a per-tool ArgSchema when defined.
+ */
+async function enforceArgSchema(
+  context: GuardianContext,
+  next: () => Promise<MiddlewareDecision>
+): Promise<MiddlewareDecision> {
+  if (!isToolCallRequest(context.request) || !context.toolName) {
+    return next();
+  }
+
+  const schema = context.policy.toolArgSchemas?.[context.toolName];
+  if (!schema) {
+    return next();
+  }
+
+  const result = validateArgs(context.toolArgs, schema);
+  if (!result.valid) {
+    return {
+      allowed: false,
+      reason: `Argument schema violation for '${context.toolName}': ${result.reason}`
     };
   }
 
@@ -511,32 +586,6 @@ async function enforceApprovalRequired(
 }
 
 /**
- * Middleware that blocks tools with an open circuit.
- */
-async function enforceCircuitState(
-  context: GuardianContext,
-  next: () => Promise<MiddlewareDecision>,
-  circuitBreaker: CircuitBreaker,
-  nowProvider: () => number
-): Promise<MiddlewareDecision> {
-  if (!isToolCallRequest(context.request) || !context.toolName) {
-    return next();
-  }
-
-  const decision = circuitBreaker.canExecute(context.toolName, nowProvider());
-  if (!decision.allowed) {
-    const retryMs = Math.max(0, decision.retryAfterMs ?? 0);
-    const retrySeconds = Math.ceil(retryMs / 1000);
-    return {
-      allowed: false,
-      reason: `Circuit breaker open for tool '${context.toolName}'. Retry in ${retrySeconds}s.`
-    };
-  }
-
-  return next();
-}
-
-/**
  * Middleware that enforces global and per-tool max-calls-per-minute policy.
  */
 async function enforceRateLimit(
@@ -597,38 +646,49 @@ async function enforceRateLimit(
 }
 
 /**
- * Middleware that rejects payloads exceeding depth or byte-size limits.
+ * Middleware that rejects requests when prompt-injection signatures are present.
  */
-async function enforceInputLimits(
+async function enforceInjectionPolicy(
   context: GuardianContext,
   next: () => Promise<MiddlewareDecision>,
-  maxDepth: number,
-  maxBytes: number
+  keywords: readonly string[]
 ): Promise<MiddlewareDecision> {
-  if (!isToolCallRequest(context.request) || context.toolArgs === undefined) {
+  if (!isToolCallRequest(context.request)) {
     return next();
   }
 
-  const depth = measureDepth(context.toolArgs);
-  if (depth > maxDepth) {
+  const scanResult = scanForPromptInjection(context.toolArgs, keywords);
+  if (scanResult.detected) {
+    const signatures = scanResult.matchedKeywords.join(", ");
     return {
       allowed: false,
-      reason: `Tool arguments exceed maximum nesting depth of ${maxDepth}.`
+      reason: `Prompt injection signature detected: ${signatures}.`
     };
   }
 
-  try {
-    const serialized = JSON.stringify(context.toolArgs);
-    if (serialized.length > maxBytes) {
-      return {
-        allowed: false,
-        reason: `Tool arguments exceed maximum size of ${maxBytes} bytes.`
-      };
-    }
-  } catch {
+  return next();
+}
+
+/**
+ * Middleware that blocks tools with an open circuit.
+ */
+async function enforceCircuitState(
+  context: GuardianContext,
+  next: () => Promise<MiddlewareDecision>,
+  circuitBreaker: CircuitBreaker,
+  nowProvider: () => number
+): Promise<MiddlewareDecision> {
+  if (!isToolCallRequest(context.request) || !context.toolName) {
+    return next();
+  }
+
+  const decision = circuitBreaker.canExecute(context.toolName, nowProvider());
+  if (!decision.allowed) {
+    const retryMs = Math.max(0, decision.retryAfterMs ?? 0);
+    const retrySeconds = Math.ceil(retryMs / 1000);
     return {
       allowed: false,
-      reason: "Tool arguments could not be serialized for size validation."
+      reason: `Circuit breaker open for tool '${context.toolName}'. Retry in ${retrySeconds}s.`
     };
   }
 
@@ -642,10 +702,13 @@ async function enforceInputLimits(
 /**
  * Core policy guard for intercepting JSON-RPC tool calls.
  *
- * This class can be used as a standalone validator (`validateRequest`) or as a
+ * Extends `TypedEmitter<GuardianEventMap>` — subscribe to `'allowed'` and
+ * `'blocked'` events with `.on()`, `.off()`, and `.once()`.
+ *
+ * Can also be used as a standalone validator (`validateRequest`) or as a
  * transport wrapper through `wrapHandler` to gate downstream request handlers.
  */
-export class McpGuardian {
+export class McpGuardian extends TypedEmitter<GuardianEventMap> {
   private readonly policy: GuardianPolicy;
 
   private readonly isDryRun: boolean;
@@ -672,6 +735,7 @@ export class McpGuardian {
    * Creates a guardian instance with policy and optional runtime controls.
    */
   public constructor(policy: GuardianPolicy, options: McpGuardianOptions = {}) {
+    super();
     this.policy = GuardianPolicySchema.parse(policy);
     this.isDryRun = options.dryRun ?? false;
     this.logger = options.logger ?? ((violation) => console.warn("[mcp-warden]", violation));
@@ -690,6 +754,7 @@ export class McpGuardian {
     this.middlewares = [
       enforceAllowedTools,
       (context, next) => enforceInputLimits(context, next, maxDepth, maxBytes),
+      enforceArgSchema,
       enforceRestrictedPaths,
       enforceApprovalRequired,
       (context, next) =>
@@ -733,6 +798,16 @@ export class McpGuardian {
     const durationMs = this.nowProvider() - start;
 
     if (decision.allowed) {
+      const event: GuardianEvent = {
+        type: "allowed",
+        timestamp: start,
+        method: request.method,
+        toolName,
+        violationCode: undefined,
+        reason: undefined,
+        durationMs
+      };
+      this._emit("allowed", event);
       this.metricsHook?.({
         timestamp: start,
         method: request.method,
@@ -757,12 +832,23 @@ export class McpGuardian {
     };
 
     this.logger(violation);
+
+    const blockedEvent: GuardianEvent = {
+      type: "blocked",
+      timestamp: start,
+      method: request.method,
+      toolName,
+      violationCode,
+      reason: violation.reason,
+      durationMs
+    };
+    this._emit("blocked", blockedEvent);
     this.metricsHook?.({
       timestamp: start,
       method: request.method,
       toolName,
       allowed: false,
-      violationCode: violationCode,
+      violationCode,
       durationMs
     });
 
